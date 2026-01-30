@@ -11,8 +11,7 @@
 
 > **Demo / 预览**
 > 
-> *(建议在此处放一张你部署后的截图，例如：screenshots/preview.png)*
-> ![Dashboard Preview](https://via.placeholder.com/800x400?text=Dashboard+Preview)
+> ![Dashboard Preview](screenshots/preview.png)
 
 ## ✨ 项目亮点
 
@@ -53,8 +52,8 @@ const CONFIG = {
   pass: "your_password_here",
   
   // 网站显示的标题
-  siteTitle: "Lollipop's Space",
-  siteSubtitle: "数字花园控制台",
+  siteTitle: "xxx Space",
+  siteSubtitle: "xxx控制台",
   
   // ...
 };
