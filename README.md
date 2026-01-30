@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Cloudflare%20Workers-orange?logo=cloudflare&style=flat-square" alt="Cloudflare Workers">
   <img src="https://img.shields.io/github/license/JiaqiaoWoo/cloudflare-worker-dashboard?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/Author-Lollipop-blueviolet?style=flat-square" alt="Author">
+  <img src="https://img.shields.io/badge/Author-loLollipop-blueviolet?style=flat-square" alt="Author">
 </p>
 
 一个基于 Cloudflare Workers 构建的极简、安全、响应式的个人导航控制台。
