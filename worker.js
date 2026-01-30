@@ -1,7 +1,7 @@
 /**
  * 个人导航页 Cloudflare Worker 模板
  * Author: Lollipop
- * Repository: https://github.com/JiaqiaoWoo/cloudflare-worker-dashboard
+ * Repository: https://github.com/loLollipop/cloudflare-worker-dashboard
  */
 
 // =================================================================
