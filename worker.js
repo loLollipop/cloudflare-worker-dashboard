@@ -1,7 +1,7 @@
 /**
  * NEBULA - Universal Cloudflare Worker Dashboard (Template) - Enhanced UI + Category Delete
  *
- * - First login default: admin / admin123456 (forced change password)
+ * - Opens dashboard directly without password login
  * - Data stored in KV (LINKS): categories & links
  * - UI:
  *   - Google search bar
@@ -13,93 +13,16 @@
  *
  * Required KV bindings:
  *   - LINKS
- *   - AUTH
- * Required secret (optional, will auto-generate if missing):
- *   - SESSION_SECRET
  */
 
-const COOKIE_NAME = "nebula_session";
-const COOKIE_MAX_AGE = 86400;
-
 const LINKS_KEY = "nebula_links_v1";
-const AUTH_KEY = "nebula_auth_v1";
-const SESSION_SECRET_FALLBACK_KEY = "nebula_session_secret_v1";
-
-const DEFAULT_USER = "admin";
-const DEFAULT_PASS = "admin123456";
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // logout
-    if (url.pathname === "/logout") {
-      return new Response("已退出", {
-        status: 302,
-        headers: { Location: "/", "Set-Cookie": buildCookie("", 0) },
-      });
-    }
-
-    // login
-    if (request.method === "POST" && url.pathname === "/login") {
-      const formData = await request.formData();
-      const user = String(formData.get("user") || "");
-      const pass = String(formData.get("pass") || "");
-
-      const auth = await loadAuth(env);
-      const userOk = user === auth.user;
-
-      let passOk = false;
-      if (auth.passHash) passOk = (await sha256Hex(pass)) === auth.passHash;
-      else passOk = pass === DEFAULT_PASS;
-
-      if (userOk && passOk) {
-        const mustChange = !!auth.forceChange || !auth.passHash;
-        const token = await signSession(env, user, mustChange);
-        return new Response(null, {
-          status: 302,
-          headers: { Location: "/", "Set-Cookie": buildCookie(token, COOKIE_MAX_AGE) },
-        });
-      }
-      return new Response("账号或密码错误", { status: 403 });
-    }
-
-    // session
-    const cookieHeader = request.headers.get("Cookie") || "";
-    const session = readCookie(cookieHeader, COOKIE_NAME);
-    const authed = session ? await verifySession(env, session) : { ok: false };
-
     // APIs
     if (url.pathname.startsWith("/api/")) {
-      if (!authed.ok) return json({ error: "Unauthorized" }, 401);
-
-      // change password
-      if (url.pathname === "/api/change-password" && request.method === "POST") {
-        const body = await safeJson(request);
-        const oldPass = String(body?.oldPass || "");
-        const newPass = String(body?.newPass || "");
-        if (newPass.length < 8) return json({ error: "新密码至少 8 位" }, 400);
-
-        const auth = await loadAuth(env);
-        let oldOk = false;
-        if (auth.passHash) oldOk = (await sha256Hex(oldPass)) === auth.passHash;
-        else oldOk = oldPass === DEFAULT_PASS;
-
-        if (!oldOk) return json({ error: "旧密码不正确" }, 403);
-
-        auth.passHash = await sha256Hex(newPass);
-        auth.forceChange = false;
-        await env.AUTH.put(AUTH_KEY, JSON.stringify(auth, null, 2));
-
-        const newToken = await signSession(env, authed.user, false);
-        return new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: {
-            "content-type": "application/json;charset=UTF-8",
-            "Set-Cookie": buildCookie(newToken, COOKIE_MAX_AGE),
-          },
-        });
-      }
 
       // get links
       if (url.pathname === "/api/links" && request.method === "GET") {
@@ -260,9 +183,6 @@ export default {
     }
 
     // pages
-    if (!authed.ok) return html(renderLoginPage(), 200);
-    if (authed.mustChange) return html(renderChangePasswordPage(), 200);
-
     const data = await loadLinks(env);
     return html(renderDashboardPage(data), 200);
   },
@@ -379,123 +299,6 @@ function uid() {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/* ---------------- KV: AUTH ---------------- */
-
-async function loadAuth(env) {
-  const raw = await env.AUTH.get(AUTH_KEY);
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed.user === "string") return parsed;
-    } catch {}
-  }
-  const seed = { user: DEFAULT_USER, passHash: "", forceChange: true };
-  await env.AUTH.put(AUTH_KEY, JSON.stringify(seed, null, 2));
-  return seed;
-}
-
-async function sha256Hex(s) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/* ---------------- Session ---------------- */
-
-function buildCookie(value, maxAge) {
-  return [
-    `${COOKIE_NAME}=${encodeURIComponent(value)}`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    `Max-Age=${maxAge}`,
-    "Secure",
-  ].join("; ");
-}
-
-function readCookie(cookieHeader, name) {
-  const m = cookieHeader.match(new RegExp(`(?:^|;\\s*)${escapeRegExp(name)}=([^;]+)`));
-  return m ? decodeURIComponent(m[1]) : "";
-}
-function escapeRegExp(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-async function signSession(env, user, mustChange) {
-  const payload = JSON.stringify({
-    u: user,
-    mc: !!mustChange,
-    exp: Date.now() + COOKIE_MAX_AGE * 1000,
-    n: uid(),
-  });
-  const payloadB64 = b64(payload);
-  const secret = await getSessionSecret(env);
-  const sig = await hmacSha256(secret, payloadB64);
-  return `${payloadB64}.${b64(sig)}`;
-}
-
-async function verifySession(env, token) {
-  try {
-    const [payloadB64, sigB64] = token.split(".");
-    if (!payloadB64 || !sigB64) return { ok: false };
-
-    const secret = await getSessionSecret(env);
-    const expected = await hmacSha256(secret, payloadB64);
-    const got = unb64(sigB64);
-    if (!timingSafeEqual(expected, got)) return { ok: false };
-
-    const payload = JSON.parse(unb64(payloadB64));
-    if (!payload?.exp || Date.now() > payload.exp) return { ok: false };
-
-    return { ok: true, user: payload.u, mustChange: !!payload.mc };
-  } catch {
-    return { ok: false };
-  }
-}
-
-function b64(str) {
-  return btoa(unescape(encodeURIComponent(str)));
-}
-function unb64(b64s) {
-  return decodeURIComponent(escape(atob(b64s)));
-}
-
-async function hmacSha256(secret, message) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(String(secret || "")),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
-  return String.fromCharCode(...new Uint8Array(sig));
-}
-
-function timingSafeEqual(a, b) {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
-}
-
-function randomHex(bytes = 32) {
-  const arr = new Uint8Array(bytes);
-  crypto.getRandomValues(arr);
-  return [...arr].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function getSessionSecret(env) {
-  if (env.SESSION_SECRET && String(env.SESSION_SECRET).trim()) {
-    return String(env.SESSION_SECRET).trim();
-  }
-  const existing = await env.AUTH.get(SESSION_SECRET_FALLBACK_KEY);
-  if (existing && existing.trim()) return existing.trim();
-
-  const generated = randomHex(32);
-  await env.AUTH.put(SESSION_SECRET_FALLBACK_KEY, generated);
-  return generated;
-}
-
 /* ---------------- HTTP helpers ---------------- */
 
 function html(body, status = 200) {
@@ -524,160 +327,6 @@ function isValidHttpUrl(s) {
 }
 
 /* ---------------- Pages ---------------- */
-
-function renderLoginPage() {
-  // 你原本的登录页已经挺 ok，保留
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>NEBULA</title>
-  <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{
-      min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;
-      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#fff;
-      background:
-        radial-gradient(1100px 900px at 20% 10%, rgba(79,70,229,.30), transparent 60%),
-        radial-gradient(1100px 900px at 90% 80%, rgba(124,58,237,.26), transparent 55%),
-        linear-gradient(135deg,#070A14,#0B1230);
-    }
-    .card{
-      width:100%;max-width:400px;margin:18px;
-      background:rgba(18,26,59,.62);
-      backdrop-filter:blur(18px);
-      border:1px solid rgba(234,240,255,.12);
-      border-radius:22px;
-      padding:34px 28px;
-      box-shadow:0 20px 70px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.08);
-    }
-    .logo{text-align:center;margin-bottom:22px}
-    .icon{
-      width:64px;height:64px;border-radius:16px;display:inline-flex;align-items:center;justify-content:center;
-      background:linear-gradient(135deg,#7C3AED,#4F46E5);
-      font-size:32px;box-shadow:0 12px 30px rgba(124,58,237,.35);margin-bottom:12px;
-    }
-    h1{
-      font-size:1.55rem;font-weight:950;letter-spacing:.08em;
-      background:linear-gradient(135deg,#EAF0FF,#C7D2FE);
-      -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-      user-select:none;
-    }
-    .g{margin-top:16px;display:flex;flex-direction:column;gap:12px}
-    input{
-      width:100%;padding:14px 16px;border-radius:12px;
-      border:1px solid rgba(234,240,255,.12);
-      background:rgba(10,16,40,.55);
-      color:#fff;font-size:1rem;outline:none;transition:.2s;
-    }
-    input:focus{border-color:rgba(124,58,237,.55);box-shadow:0 0 0 3px rgba(124,58,237,.14);background:rgba(10,16,40,.72)}
-    button{
-      padding:14px;border:none;border-radius:12px;cursor:pointer;font-weight:950;font-size:1rem;color:#fff;
-      background:linear-gradient(135deg,#7C3AED,#4F46E5);
-      box-shadow:0 10px 30px rgba(124,58,237,.22);
-      transition:.2s;
-    }
-    button:hover{transform:translateY(-1px);box-shadow:0 14px 40px rgba(124,58,237,.28)}
-    .hint{margin-top:14px;color:rgba(234,240,255,.65);font-weight:700;font-size:.86rem;text-align:center}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">
-      <div class="icon">🪐</div>
-      <h1>NEBULA</h1>
-    </div>
-    <form action="/login" method="POST" class="g">
-      <input name="user" placeholder="用户名" autocomplete="username" required>
-      <input name="pass" type="password" placeholder="密码" autocomplete="current-password" required>
-      <button type="submit">登 录</button>
-    </form>
-    <div class="hint">首次登录默认：admin / admin123456（登录后强制改密码）</div>
-  </div>
-</body>
-</html>`;
-}
-
-function renderChangePasswordPage() {
-  // 保留你原本的改密码页
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>NEBULA</title>
-  <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{
-      min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;
-      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#fff;
-      background:
-        radial-gradient(1100px 900px at 20% 10%, rgba(79,70,229,.30), transparent 60%),
-        radial-gradient(1100px 900px at 90% 80%, rgba(124,58,237,.26), transparent 55%),
-        linear-gradient(135deg,#070A14,#0B1230);
-    }
-    .card{
-      width:100%;max-width:460px;margin:18px;
-      background:rgba(18,26,59,.62);
-      backdrop-filter:blur(18px);
-      border:1px solid rgba(234,240,255,.12);
-      border-radius:22px;
-      padding:28px;
-      box-shadow:0 22px 80px rgba(0,0,0,.55);
-    }
-    h1{font-size:1.2rem;font-weight:950;color:#EAF0FF;margin-bottom:14px;text-align:center}
-    .g{display:flex;flex-direction:column;gap:12px}
-    input{
-      width:100%;padding:14px 16px;border-radius:12px;border:1px solid rgba(234,240,255,.12);
-      background:rgba(10,16,40,.55);color:#fff;font-size:1rem;outline:none;transition:.2s;
-    }
-    input:focus{border-color:rgba(124,58,237,.55);box-shadow:0 0 0 3px rgba(124,58,237,.14);background:rgba(10,16,40,.72)}
-    button{
-      padding:14px;border:none;border-radius:12px;cursor:pointer;font-weight:950;font-size:1rem;color:#fff;
-      background:linear-gradient(135deg,#7C3AED,#4F46E5);box-shadow:0 10px 30px rgba(124,58,237,.22);transition:.2s;
-    }
-    button:hover{transform:translateY(-1px);box-shadow:0 14px 40px rgba(124,58,237,.28)}
-    .msg{margin-top:12px;color:#fca5a5;font-weight:900;display:none;text-align:center}
-    .ok{color:#86efac}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>修改密码</h1>
-    <div class="g">
-      <input id="oldPass" type="password" placeholder="旧密码" autocomplete="current-password">
-      <input id="newPass" type="password" placeholder="新密码（至少 8 位）" autocomplete="new-password">
-      <button id="save">保存</button>
-    </div>
-    <div class="msg" id="msg"></div>
-  </div>
-
-  <script>
-    const msg = document.getElementById('msg');
-    const show = (t, ok=false)=>{ msg.textContent=t; msg.style.display='block'; msg.className = 'msg' + (ok?' ok':''); };
-
-    document.getElementById('save').onclick = async ()=>{
-      const oldPass = document.getElementById('oldPass').value;
-      const newPass = document.getElementById('newPass').value;
-      try{
-        const res = await fetch('/api/change-password',{
-          method:'POST',
-          headers:{'content-type':'application/json'},
-          body: JSON.stringify({oldPass,newPass})
-        });
-        const out = await res.json().catch(()=>({}));
-        if(!res.ok) return show(out.error || '保存失败');
-        show('已保存 ✅', true);
-        setTimeout(()=>location.href='/', 450);
-      }catch(e){
-        show('网络错误');
-      }
-    };
-  </script>
-</body>
-</html>`;
-}
 
 function renderDashboardPage(data) {
   const safeData = JSON.stringify(data).replace(/</g, "\\u003c");
@@ -1130,7 +779,6 @@ select optgroup {
         <div class="actions">
           <button class="pill" id="btnTheme" title="切换亮/暗">🌙</button>
           <button class="pill" id="btnManage">🧩 管理分类</button>
-          <a class="pill danger" href="/logout">🚪 退出</a>
         </div>
       </div>
 
