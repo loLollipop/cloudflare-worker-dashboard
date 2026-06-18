@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Author-loLollipop-blueviolet?style=flat-square" alt="Author">
 </p>
 
-一个基于 Cloudflare Workers 构建的个人导航控制台：**极简、可自助配置、支持拖拽排序**，并且默认带登录保护。
+一个基于 Cloudflare Workers 构建的个人导航控制台：**极简、可自助配置、支持拖拽排序**，打开即可直接进入控制台。
 
 无需服务器、无需数据库，使用 Cloudflare KV 在边缘存储你的分类与链接，免费部署属于你的个人入口。
 
@@ -19,9 +19,9 @@
 ## ✨ 项目亮点
 
 - **⚡ Serverless 架构**：部署在 Cloudflare Workers，边缘节点就近访问。
-- **🔒 登录保护 + 强制改密**：
-  - 首次登录默认账号：`admin / admin123456`
-  - 登录后会进入“修改密码”页，密码以 **SHA-256 哈希**保存到 KV（不会在代码里明文出现）。
+- **🚪 免登录访问**：
+  - 访问 Worker 地址即可直接进入控制台，无需输入账号密码。
+  - 页面内的链接与分类编辑能力保持不变。
 - **🧠 自助配置（无需改代码）**：
   - 在页面内新增/编辑/删除链接
   - 支持“新建分类”，并可随时重命名
@@ -49,48 +49,31 @@
 
 ---
 
-## 🧱 必需配置（KV + Secret）
+## 🧱 必需配置（KV）
 
 本项目依赖：
 
 - KV 命名空间：`LINKS`（存储分类与链接）
-- KV 命名空间：`AUTH`（存储登录账号与密码哈希）
-- Secret：`SESSION_SECRET`（签名 Cookie Session）
 
 ### 2) 创建 KV 命名空间
 
 Cloudflare 控制台 → **Storage & Databases → KV** → Create a namespace
 
-创建两个：
+创建一个：
 
 - `nebula_links`
-- `nebula_auth`
 
 ### 3) 绑定 KV 到 Worker
 
 回到：**Workers & Pages → 你的 Worker → Settings → Variables**
 
-找到 **KV Namespace Bindings**，新增两条：
+找到 **KV Namespace Bindings**，新增一条：
 
 | Binding name | KV Namespace |
 |---|---|
 | `LINKS` | `nebula_links` |
-| `AUTH`  | `nebula_auth` |
 
-> 绑定名必须是 `LINKS` / `AUTH`（代码里固定用这个）
-
-### 4) 设置 SESSION_SECRET
-
-同页面（Variables）找到 **Secrets** → Add secret：
-
-- Name: `SESSION_SECRET`
-- Value: 随便一串强随机（建议 32+ 位）
-
-不配置也能用，系统会自动生成并写入 KV
-
-```js
-crypto.getRandomValues(new Uint8Array(32))
-```
+> 绑定名必须是 `LINKS`（代码里固定用这个）
 ## 一键部署
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/loLollipop/cloudflare-worker-dashboard.git)
 
@@ -100,14 +83,7 @@ crypto.getRandomValues(new Uint8Array(32))
 
 访问你的 Worker 地址即可使用。
 
-
-## 🔑 默认账号密码（首次）
-
-用户名：admin
-
-密码：admin123456
-
-首次登录会强制进入“修改密码”页面，修改后才会进入控制台。
+> 如果你之前已经部署过带登录页的旧版本，请重新复制/部署最新 `worker.js`。看到旧登录页通常表示线上 Worker 仍是旧代码，或浏览器还打开着旧页面；新版本访问 `/login` 或 `/logout` 会自动回到首页。
 
 
 ## 🧭 使用指南（部署后怎么玩）
@@ -141,11 +117,7 @@ crypto.getRandomValues(new Uint8Array(32))
 
 ## 🛡️ 安全说明
 
-密码不会写在代码里；修改后以 SHA-256 哈希保存到 AUTH KV
-
-Session 使用 SESSION_SECRET 做 HMAC 签名，避免伪造
-
-Cookie 设置 HttpOnly + SameSite=Lax + Secure
+当前版本已移除密码登录页，访问 Worker 地址即可直接管理链接和分类。请只部署在你信任的访问环境中；如需公网访问保护，建议在 Cloudflare 前置 Access、Zero Trust 或其他访问控制。
 
 ## 📄 License
 
