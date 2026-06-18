@@ -21,6 +21,18 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // Backward compatibility for browsers that still have the old login page open.
+    // Submitting or visiting the old auth URLs now just enters the dashboard.
+    if (url.pathname === "/login" || url.pathname === "/logout") {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: "/",
+          "Set-Cookie": "nebula_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
+        },
+      });
+    }
+
     // APIs
     if (url.pathname.startsWith("/api/")) {
 
@@ -302,12 +314,21 @@ function uid() {
 /* ---------------- HTTP helpers ---------------- */
 
 function html(body, status = 200) {
-  return new Response(body, { status, headers: { "content-type": "text/html;charset=UTF-8" } });
+  return new Response(body, {
+    status,
+    headers: {
+      "content-type": "text/html;charset=UTF-8",
+      "cache-control": "no-store",
+    },
+  });
 }
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { "content-type": "application/json;charset=UTF-8" },
+    headers: {
+      "content-type": "application/json;charset=UTF-8",
+      "cache-control": "no-store",
+    },
   });
 }
 async function safeJson(request) {

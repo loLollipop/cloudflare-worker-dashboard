@@ -1,4 +1,5 @@
 {
   "name": "nebula-worker",
-  "private": true
+  "private": true,
+  "type": "module"
 }

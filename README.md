@@ -83,6 +83,8 @@ Cloudflare 控制台 → **Storage & Databases → KV** → Create a namespace
 
 访问你的 Worker 地址即可使用。
 
+> 如果你之前已经部署过带登录页的旧版本，请重新复制/部署最新 `worker.js`。看到旧登录页通常表示线上 Worker 仍是旧代码，或浏览器还打开着旧页面；新版本访问 `/login` 或 `/logout` 会自动回到首页。
+
 
 ## 🧭 使用指南（部署后怎么玩）
 
