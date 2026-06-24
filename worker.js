@@ -15,7 +15,8 @@
  *   - LINKS
  */
 
-const LINKS_KEY = "nebula_links_v1";
+const LINKS_KEY = "links_v3";
+const FALLBACK_LINKS_KEYS = ["links_v2", "links_v1", "nebula_links_v1"];
 
 export default {
   async fetch(request, env) {
@@ -75,7 +76,7 @@ export default {
           icon: icon || faviconFromUrl(linkUrl),
         });
 
-        await env.LINKS.put(LINKS_KEY, JSON.stringify(data, null, 2));
+        await saveLinks(env, data);
         return json({ ok: true, data }, 200);
       }
 
@@ -108,7 +109,7 @@ export default {
           }
         }
 
-        await env.LINKS.put(LINKS_KEY, JSON.stringify(data, null, 2));
+        await saveLinks(env, data);
         return json({ ok: true, data }, 200);
       }
 
@@ -127,7 +128,7 @@ export default {
         }
         if (!deleted) return json({ error: "not found" }, 404);
 
-        await env.LINKS.put(LINKS_KEY, JSON.stringify(data, null, 2));
+        await saveLinks(env, data);
         return json({ ok: true, data }, 200);
       }
 
@@ -140,7 +141,7 @@ export default {
         const stored = await loadLinks(env);
         const next = applyReorder(stored, patch);
 
-        await env.LINKS.put(LINKS_KEY, JSON.stringify(next, null, 2));
+        await saveLinks(env, next);
         return json({ ok: true, data: next }, 200);
       }
 
@@ -156,7 +157,7 @@ export default {
         if (!cat) return json({ error: "not found" }, 404);
 
         cat.name = newName;
-        await env.LINKS.put(LINKS_KEY, JSON.stringify(data, null, 2));
+        await saveLinks(env, data);
         return json({ ok: true, data }, 200);
       }
 
@@ -187,7 +188,7 @@ export default {
         target.links.push(...(removed.links || []));
         data.categories.splice(idx, 1);
 
-        await env.LINKS.put(LINKS_KEY, JSON.stringify(data, null, 2));
+        await saveLinks(env, data);
         return json({ ok: true, data }, 200);
       }
 
@@ -203,12 +204,15 @@ export default {
 /* ---------------- KV: LINKS ---------------- */
 
 async function loadLinks(env) {
-  const raw = await env.LINKS.get(LINKS_KEY);
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.categories)) return normalizeLinks(parsed);
-    } catch {}
+  const primary = await readLinksData(env, LINKS_KEY);
+  if (primary) return primary.data;
+
+  for (const key of FALLBACK_LINKS_KEYS) {
+    const source = await readLinksData(env, key);
+    if (source && source.data.categories.some((c) => c.links.length)) {
+      await saveLinks(env, source.data);
+      return source.data;
+    }
   }
 
   // Empty template: only one empty category, no links
@@ -222,8 +226,35 @@ async function loadLinks(env) {
     ],
   };
 
-  await env.LINKS.put(LINKS_KEY, JSON.stringify(seed, null, 2));
+  await saveLinks(env, seed);
   return seed;
+}
+
+async function readLinksData(env, key) {
+  const raw = await env.LINKS.get(key);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.categories)) {
+      return { key, raw: parsed, data: normalizeLinks(parsed) };
+    }
+  } catch {}
+
+  return null;
+}
+
+async function saveLinks(env, data) {
+  const payload = {
+    ...data,
+    _meta: {
+      storageKey: LINKS_KEY,
+      fallbackKeys: FALLBACK_LINKS_KEYS,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+
+  await env.LINKS.put(LINKS_KEY, JSON.stringify(payload, null, 2));
 }
 
 function normalizeLinks(data) {
