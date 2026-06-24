@@ -77,6 +77,27 @@ Cloudflare 控制台 → **Storage & Databases → KV** → Create a namespace
 ## 一键部署
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/loLollipop/cloudflare-worker-dashboard.git)
 
+## 🔄 GitHub 自动同步部署
+
+仓库已内置 GitHub Actions 工作流：`.github/workflows/deploy-worker.yml`。
+
+配置一次后，每次推送到 `main` 分支，GitHub 会自动执行 `wrangler deploy --keep-vars`，把最新 `worker.js` 部署到 Cloudflare Workers。
+
+### 需要添加的 GitHub Secrets
+
+进入 GitHub 仓库：**Settings → Secrets and variables → Actions → New repository secret**，添加：
+
+| Secret name | 用途 |
+|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare Account ID |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API Token，需有 Workers 部署权限 |
+| `CLOUDFLARE_KV_LINKS_ID` | 原 `LINKS` 绑定使用的 KV namespace ID |
+| `CLOUDFLARE_WORKER_NAME` | 可选；如果你的线上 Worker 不叫 `nebula`，填真实 Worker 名称 |
+
+> `CLOUDFLARE_KV_LINKS_ID` 必须填你原来线上 Worker 正在使用的 KV namespace ID，这样自动部署后分类和链接数据仍然保留。
+
+配置完成后，也可以在 GitHub 的 **Actions → Deploy Worker → Run workflow** 手动触发一次部署。
+
 ## ✅ 部署上线
 
 完成以上配置后，回到在线编辑器右上角点击 Deploy。

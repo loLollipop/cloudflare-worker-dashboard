@@ -1,0 +1,67 @@
+name: Deploy Worker
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-worker-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare Workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate Cloudflare secrets
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_KV_LINKS_ID: ${{ secrets.CLOUDFLARE_KV_LINKS_ID }}
+        run: |
+          missing=0
+
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_KV_LINKS_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing GitHub secret: ${name}"
+              missing=1
+            fi
+          done
+
+          if ! [[ "${CLOUDFLARE_KV_LINKS_ID}" =~ ^[A-Fa-f0-9]{32}$ ]]; then
+            echo "::error::CLOUDFLARE_KV_LINKS_ID must be the 32-character KV namespace id."
+            missing=1
+          fi
+
+          exit "${missing}"
+
+      - name: Prepare Wrangler config
+        shell: bash
+        env:
+          CLOUDFLARE_KV_LINKS_ID: ${{ secrets.CLOUDFLARE_KV_LINKS_ID }}
+          CLOUDFLARE_WORKER_NAME: ${{ secrets.CLOUDFLARE_WORKER_NAME }}
+        run: |
+          if [ -n "${CLOUDFLARE_WORKER_NAME}" ]; then
+            sed -i "s/^name = \".*\"/name = \"${CLOUDFLARE_WORKER_NAME}\"/" wrangler.toml
+          fi
+
+          sed -i "s/00000000000000000000000000000000/${CLOUDFLARE_KV_LINKS_ID}/" wrangler.toml
+          grep -q "id = \"${CLOUDFLARE_KV_LINKS_ID}\"" wrangler.toml
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: deploy --keep-vars
