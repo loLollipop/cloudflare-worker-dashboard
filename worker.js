@@ -539,7 +539,11 @@ function renderDashboardPage(data) {
       height: calc(100vh - var(--topbar-h) - var(--gap));
       max-width:1240px;margin:0 auto;
       padding: 10px 0 40px;
+      overflow-y:auto;
+      overscroll-behavior:contain;
+      scrollbar-width:none;
     }
+    .section::-webkit-scrollbar{display:none}
 
     .section-title{
       font-size:1.08rem;
@@ -957,11 +961,40 @@ select optgroup {
 
     function goTo(i){
       const max = (state.data.categories?.length || 1) - 1;
-      state.index = Math.max(0, Math.min(max, i));
+      const next = Math.max(0, Math.min(max, i));
+      if (next !== state.index) {
+        state.index = next;
+        const current = getCurrentSection();
+        if (current) current.scrollTop = 0;
+      } else {
+        state.index = next;
+      }
       applyTransform();
     }
 
+    function getCurrentSection(){
+      return document.querySelectorAll(".section")[state.index] || null;
+    }
+
     function wheelHandler(e){
+      const current = getCurrentSection();
+      if (current) {
+        const maxScroll = current.scrollHeight - current.clientHeight;
+        const canScrollInside = maxScroll > 2;
+        const atTop = current.scrollTop <= 0;
+        const atBottom = current.scrollTop >= maxScroll - 1;
+        const goingDown = e.deltaY > 0;
+        const goingUp = e.deltaY < 0;
+
+        // First scroll long categories so cards at the bottom remain reachable.
+        // Only switch categories when the current category has reached its edge.
+        if (canScrollInside && ((goingDown && !atBottom) || (goingUp && !atTop))) {
+          e.preventDefault();
+          current.scrollTop += e.deltaY;
+          return;
+        }
+      }
+
       e.preventDefault();
       if (state.lock) return;
       state.lock = true;
